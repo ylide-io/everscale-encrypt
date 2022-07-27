@@ -11,35 +11,40 @@ fn convert_to_array<T, const N: usize>(v: Vec<T>) -> [T; N] {
 }
 
 #[wasm_bindgen]
-pub fn generate_ephemeral(recipient_public: &str) -> String {
-    let ephemeral_keys = ed25519::KeyPair::generate(&mut rand::thread_rng());
-
-    let recipient_public_key_bytes: [u8; 32] = convert_to_array(hex::decode(recipient_public).unwrap());
-    let recipient_public_key = ed25519::PublicKey::from_bytes(recipient_public_key_bytes).unwrap();
-
-    let shared_secret = ephemeral_keys.compute_shared_secret(&recipient_public_key);
-    let sender_public_key_bytes = ephemeral_keys.public_key.to_bytes();
-
-    let mut result_string: String = hex::encode(&sender_public_key_bytes).to_owned();
-    result_string.push_str(&hex::encode(&shared_secret).to_owned());
-
-    return result_string;
+pub fn generate_ephemeral() -> String {
+    let secret_key = ed25519::SecretKey::generate(&mut rand::thread_rng());
+    return hex::encode(&secret_key.to_bytes());
 }
 
 #[wasm_bindgen]
-pub fn encrypt(raw_message: &str, raw_key: &str, raw_nonce: &str) -> String {
-    let message_bytes = hex::decode(raw_message).unwrap();
-    let key_bytes = hex::decode(raw_key).unwrap();
+pub fn get_public_key(secret_key_hex: &str) -> String {
+    let secret_key_bytes: [u8; 32] = convert_to_array(hex::decode(secret_key_hex).unwrap());
+    let secret_key = ed25519::SecretKey::from_bytes(secret_key_bytes);
+    let public_key = ed25519::PublicKey::from(&secret_key);
+    return hex::encode(&public_key.to_bytes());
+}
+
+#[wasm_bindgen]
+pub fn encrypt(secret_key_hex: &str, recipient_public_hex: &str, raw_data: &str, raw_nonce: &str) -> String {
+    let secret_key_bytes: [u8; 32] = convert_to_array(hex::decode(secret_key_hex).unwrap());
+    let ephemeral_keys = ed25519::KeyPair::from(&ed25519::SecretKey::from_bytes(secret_key_bytes));
+    
+    let recipient_public_key_bytes: [u8; 32] = convert_to_array(hex::decode(recipient_public_hex).unwrap());
+    let recipient_public_key = ed25519::PublicKey::from_bytes(recipient_public_key_bytes).unwrap();
+
+    let shared_secret = ephemeral_keys.compute_shared_secret(&recipient_public_key);
+
+    let data_bytes = hex::decode(raw_data).unwrap();
     let nonce_bytes = hex::decode(raw_nonce).unwrap();
 
-    let key = Key::from_slice(&key_bytes); // 32-bytes
+    let key = Key::from_slice(&shared_secret); // 32-bytes
     let cipher = ChaCha20Poly1305::new(key);
 
     let nonce = Nonce::from_slice(&nonce_bytes); // 12-bytes; unique per message
 
-    let message_bytes_arr: &[u8] = &message_bytes;
+    let data_bytes_arr: &[u8] = &data_bytes;
 
-    let ciphertext = cipher.encrypt(nonce, message_bytes_arr).expect("encryption failure!");
+    let ciphertext = cipher.encrypt(nonce, data_bytes_arr).expect("encryption failure!");
 
     return hex::encode(&ciphertext);
 }
