@@ -37,10 +37,10 @@ pub fn encrypt(
     hex::encode(ciphertext)
 }
 
-fn cipher(secret_key_hex: &str, recipient_public_hex: &str) -> ChaCha20Poly1305 {
-    let ephemeral_keys = ed25519::KeyPair::from(&secret_key_from_hex(secret_key_hex));
-    let recipient_public_key = public_key_from_hex(recipient_public_hex);
-    let shared_secret = ephemeral_keys.compute_shared_secret(&recipient_public_key);
+fn cipher(user_secret_key: &str, other_side_public_key: &str) -> ChaCha20Poly1305 {
+    let ephemeral_keys = ed25519::KeyPair::from(&secret_key_from_hex(user_secret_key));
+    let other_side_public_key = public_key_from_hex(other_side_public_key);
+    let shared_secret = ephemeral_keys.compute_shared_secret(&other_side_public_key);
     let key = Key::from(shared_secret); // 32-bytes
 
     ChaCha20Poly1305::new(&key)
@@ -77,42 +77,39 @@ mod tests {
         let secret_hex = "a84462ec64db0c5a1d4b3b77f70b5c1ee2fe753b95eccd1302b7e7cd03d24640";
         let recipient_secret = "96f14d2c755ddfe9ea7ff911a1d0b5f22327d503ef8c2ebdbfff3c22232dd45b";
         let public_recipient = get_public_key(recipient_secret);
-        assert_eq!("2f8a8dfa4d60c05c27bcd1852e28da10f7d509e4851a6f83002606e6762a99d9", public_recipient);
+        assert_eq!(
+            "2f8a8dfa4d60c05c27bcd1852e28da10f7d509e4851a6f83002606e6762a99d9",
+            public_recipient
+        );
         let message = "Hello, world!";
         let message_hex = hex::encode(message);
 
-        let nonce = "111111111111111111111111";
-        let nonce_bytes = hex::decode(nonce).unwrap();
+        let nonce_hex = "111111111111111111111111";
 
         let encrypted_message_hex = encrypt(
             secret_hex,
             public_recipient.as_str(),
             message_hex.as_str(),
-            nonce,
+            nonce_hex,
         );
-        assert_eq!("6da85e22b9b67af048adab7ed21f279e2dcccadac1424c48f38939eb49", encrypted_message_hex);
+        assert_eq!(
+            "6da85e22b9b67af048adab7ed21f279e2dcccadac1424c48f38939eb49",
+            encrypted_message_hex
+        );
         let encrypted_message = hex::decode(encrypted_message_hex).unwrap();
 
-        let decipher = decipher(
-            recipient_secret,
-            get_public_key(secret_hex).as_str(),
+        let cipher = cipher(recipient_secret, get_public_key(secret_hex).as_str());
+
+        let decrypted_by_recipient_message_bytes = cipher
+            .decrypt(
+                &nonce_from_hex(nonce_hex),
+                encrypted_message.as_slice(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            String::from_utf8(decrypted_by_recipient_message_bytes).unwrap(),
+            message
         );
-
-        let decrypted_by_recipient_message_bytes = decipher.decrypt(Nonce::from_slice(nonce_bytes.as_slice()), encrypted_message.as_slice()).unwrap();
-
-        assert_eq!(String::from_utf8(decrypted_by_recipient_message_bytes).unwrap(), message);
-    }
-
-    fn decipher(recipient_secret: &str, sender_public: &str) -> ChaCha20Poly1305 {
-        let secret_key_bytes = convert_to_array(hex::decode(recipient_secret).unwrap());
-        let ephemeral_keys = ed25519::KeyPair::from(&ed25519::SecretKey::from_bytes(secret_key_bytes));
-
-        let sender_public_key_bytes = convert_to_array(hex::decode(sender_public).unwrap());
-        let sender_public_key = ed25519::PublicKey::from_bytes(sender_public_key_bytes).unwrap();
-
-        let shared_secret = ephemeral_keys.compute_shared_secret(&sender_public_key);
-
-        let key = Key::from_slice(&shared_secret); // 32-bytes
-        ChaCha20Poly1305::new(key)
     }
 }
